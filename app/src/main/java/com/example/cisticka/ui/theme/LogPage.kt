@@ -2,6 +2,7 @@ package com.example.cisticka.ui.theme
 import android.content.Context
 import android.content.res.Configuration
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -26,6 +28,7 @@ import com.example.cisticka.R
 import com.example.cisticka.formatLogData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -36,11 +39,14 @@ import kotlinx.coroutines.withContext
 fun LogPage(
     navigateBack: () -> Unit,
     logsFlow: StateFlow<List<String>>,
-    isWebSocketConnected: Boolean
+    isWebSocketConnected: Boolean,
+    getTranslatedErrorMessage: (String) -> String
 ) {
     val context = LocalContext.current
     val orientation = LocalConfiguration.current.orientation
     val logs by logsFlow.collectAsState()
+    val errorMessage by ApiService.errorMessage.collectAsState() // Sledovanie chýb
+    val coroutineScope = rememberCoroutineScope()
 
     fun sendLogFile() {
         CoroutineScope(Dispatchers.IO).launch {
@@ -57,10 +63,17 @@ fun LogPage(
         }
     }
 
-    // Funkcia na získanie preloženej správy
     fun getTranslatedLog(line2: String, context: Context): String {
-        val resId = logTranslations[line2] ?: R.string.unknowLog // Predvolený text pre neznáme kódy
-        return context.getString(resId)
+        val splitIndex = line2.indexOf(",")
+        return if (splitIndex != -1) {
+            val code = line2.substringBefore(",")
+            val remaining = line2.substringAfter(",")
+            val resId = logTranslations[code] ?: R.string.unknowLog
+            context.getString(resId) + "," + remaining
+        } else {
+            val resId = logTranslations[line2] ?: R.string.unknowLog
+            context.getString(resId)
+        }
     }
 
     // Príklad použitia
@@ -103,7 +116,9 @@ fun LogPage(
                         Icon(Icons.Default.Home, contentDescription = stringResource(R.string.home))
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .width(600.dp)
+                    .padding(horizontal = if (orientation == Configuration.ORIENTATION_PORTRAIT) 8.dp else 25.dp)
             )
         }
     ) { innerPadding ->
@@ -116,6 +131,27 @@ fun LogPage(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Zobrazenie chybovej hlášky
+            errorMessage?.let { message ->
+                val translatedMessage = getTranslatedErrorMessage(message)
+                Text(
+                    text = translatedMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .background(MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                    textAlign = TextAlign.Center
+                )
+                coroutineScope.launch {
+                    delay(10_000) // 30 sekúnd
+                    if (ApiService.errorMessage.value == message) {
+                        ApiService.clearErrorMessage() // Bezpečná mutácia cez metódu
+                    }
+                }
+            }
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -164,18 +200,6 @@ private val logTranslations = mapOf(
     "VCCDisconnected" to R.string.VCCDisconnected,
     "Start" to R.string.Start,
     "WiFicould" to R.string.WiFicould,
-    "HeatingON" to R.string.HeatingON,
-    "TemperatureToLow" to R.string.TemperatureToLow,
-    "VetilInPosition" to R.string.VetilInPosition,
-    "VentilNotInPosition" to R.string.VentilNotInPosition,
-    "HeatingOFF" to R.string.HeatingOFF,
-    "VentilToDrainPos" to R.string.VentilToDrainPos,
-    "VentilToCleaning" to R.string.VentilToCleaning,
-    "VentilIsInCleaning" to R.string.VentilIsInCleaning,
-    "VentilNotInCleaning" to R.string.VentilNotInCleaning,
-    "VentilToRecirkulation" to R.string.VentilToRecirkulation,
-    "VentilIsInRecirkulacion" to R.string.VentilIsInRecirkulacion,
-    "VentilNotInRecirkulacion" to R.string.VentilNotInRecirkulacion,
     "LogFileDeleted" to R.string.LogFileDeleted,
     "FailedToDelete" to R.string.FailedToDelete,
     "WiFiDisconnected" to R.string.WiFiDisconnected,
@@ -185,7 +209,31 @@ private val logTranslations = mapOf(
     "TimeSet" to R.string.TimeSet,
     "NTPSet" to R.string.NTPSet,
     "OtputChanged" to R.string.OtputChanged,
-    "InputChanged" to R.string.InputChanged,
+    "temperatureNotReached" to R.string.temperatureNotReached,
+    "temperatureToLow" to R.string.temperatureToLow,
+    "drainInputOn" to R.string.drainInputOn,
+    "drainInputOff" to R.string.drainInputOff,
+    "cleanInput" to R.string.cleanInput,
+    "cleanInputOn" to R.string.cleanInputOn,
+    "cleanInputOff" to R.string.cleanInputOff,
+    "tankInputOn" to R.string.tankInputOn,
+    "tankInputOff" to R.string.tankInputOff,
+    "input4On" to R.string.input4On,
+    "input4Off" to R.string.input4Off,
+    "invalideInputIndex" to R.string.invalideInputIndex,
+    "drainVentilOn" to R.string.drainVentilOn,
+    "drainVentilOff" to R.string.drainVentilOff,
+    "cleanVentilOn" to R.string.cleanVentilOn,
+    "cleanVentilOff" to R.string.cleanVentilOff,
+    "preheatOn" to R.string.preheatOn,
+    "preheatOff" to R.string.preheatOff,
+    "output4On" to R.string.output4On,
+    "output4Off" to R.string.output4Off,
+    "invalideOutputIndex" to R.string.invalideOutputIndex,
+    "SDKardError" to R.string.SDCardError,
+    "NTPError" to R.string.NTPError,
+    "clientConnected" to R.string.clientConnected,
+    "TimeSetError" to R.string.TimeSetError,
 )
 
 @Composable
@@ -198,6 +246,7 @@ fun PreviewLogPage() {
     LogPage(
         navigateBack = {},
         logsFlow = fakeLogs,
-        isWebSocketConnected = true
+        isWebSocketConnected = true,
+        getTranslatedErrorMessage = { it } // Mock prekladu
     )
 }

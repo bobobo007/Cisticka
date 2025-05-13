@@ -4,6 +4,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val gitBranch = try {
+    ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+        .start()
+        .inputStream.bufferedReader().readText().trim()
+} catch (_: Exception) {
+    "unknown"
+}
+
 android {
     namespace = "com.example.cisticka"
     compileSdk = 35
@@ -11,11 +19,12 @@ android {
     defaultConfig {
         applicationId = "com.example.cisticka"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "GIT_BRANCH", "\"$gitBranch\"")
     }
 
     buildTypes {
@@ -36,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

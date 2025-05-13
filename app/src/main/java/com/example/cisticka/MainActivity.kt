@@ -1,4 +1,5 @@
 package com.example.cisticka
+
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
@@ -7,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -26,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -39,11 +40,11 @@ import androidx.compose.ui.text.style.TextAlign
 import com.example.cisticka.ui.theme.ApiService
 import com.example.cisticka.ui.theme.ApiService.WebSocketData
 import com.example.cisticka.ui.theme.InfoPage
-import com.example.cisticka.ui.theme.InputOutputPage
 import com.example.cisticka.ui.theme.SetupPage
 import com.example.cisticka.ui.theme.LogPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -51,26 +52,29 @@ import kotlin.String
 import kotlin.collections.List
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        val sharedPrefs = newBase.getSharedPreferences("AppPreferences", MODE_PRIVATE)
+        val languageCode = sharedPrefs.getString("language", "sk") ?: "sk"
+        super.attachBaseContext(applyLocale(newBase, languageCode))
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
-        val sharedPrefs = getSharedPreferences("AppPreferences", MODE_PRIVATE)
-        val languageCode = sharedPrefs.getString("language", "sk") ?: "sk" // Predvolený jazyk
-
-        // Nastavenie jazyka pred inicializáciou obsahu
-        applyLocale(this, languageCode)
-
         super.onCreate(savedInstanceState)
+        ApiService.loadWebSocketUrl(this) // <<--- DOPLNENÉ sem
         enableEdgeToEdge()
         setContent {
             CistickaTheme {
                 var currentPage by rememberSaveable { mutableStateOf("MainPage") }
                 val isWebSocketConnected by ApiService.isWebSocketConnected.collectAsState(false)
-                val webSocketData by ApiService.webSocketData.collectAsState() // Pozorujeme zmeny dát
-                val logsFlow = ApiService.logsf // Inicializácia logsFlow
+                val webSocketData by ApiService.webSocketData.collectAsState()
+                val logsFlow = ApiService.logsf
+
+                val translateError: (String) -> String = { message ->
+                    getTranslatedErrorMessage(this, message)
+                }
 
                 when (currentPage) {
                     "MainPage" -> MainPageWithMenuAndCards(
                         navigateToInfo = { currentPage = "InfoPage" },
-                        navigateToInputOutput = { currentPage = "InputOutputPage" },
                         navigateToSetup = { currentPage = "SetupPage" },
                         navigateToLogs = { currentPage = "LogPage" },
                         webSocketData = webSocketData,
@@ -80,27 +84,24 @@ class MainActivity : ComponentActivity() {
                         navigateBack = { currentPage = "MainPage" },
                         webSocketData = webSocketData,
                         isWebSocketConnected = isWebSocketConnected
-
-                    )
-                    "InputOutputPage" -> InputOutputPage(
-                        navigateBack = { currentPage = "MainPage" },
-                        webSocketData = webSocketData,
-                        isWebSocketConnected = isWebSocketConnected
                     )
                     "SetupPage" -> SetupPage(
                         navigateBack = { currentPage = "MainPage" },
-                        webSocketData = webSocketData,
-                        isWebSocketConnected = isWebSocketConnected
+                        isWebSocketConnected = isWebSocketConnected,
+                        getTranslatedErrorMessage = translateError
                     )
                     "LogPage" -> LogPage(
                         navigateBack = { currentPage = "MainPage" },
                         logsFlow = logsFlow,
-                        isWebSocketConnected = isWebSocketConnected
+                        isWebSocketConnected = isWebSocketConnected,
+                        getTranslatedErrorMessage = translateError
                     )
                 }
             }
         }
     }
+
+
     override fun onStart() {
         super.onStart()
         ApiService.connectWebSocket(
@@ -114,21 +115,35 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStop() {
         super.onStop()
-        ApiService.closeWebSocket() // Uzatvorenie spojenia pri prechode na pozadie
+        ApiService.closeWebSocket()
         finish()
     }
     override fun onDestroy() {
         super.onDestroy()
-        ApiService.closeWebSocket() // Uzatvorenie spojenia pri ukončení aktivity
+        ApiService.closeWebSocket()
     }
 }
 
+fun getTranslatedErrorMessage(context: Context, message: String): String {
+    val resId = errorTranslations[message]
+    return if (resId != null) {
+        context.getString(resId)
+    } else {
+        message // Ak preklad neexistuje, použije sa pôvodná správa
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: () -> Unit, navigateToSetup: () -> Unit, navigateToLogs: () -> Unit, webSocketData: WebSocketData, isWebSocketConnected: Boolean) {
+fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToSetup: () -> Unit, navigateToLogs: () -> Unit, webSocketData: WebSocketData, isWebSocketConnected: Boolean) {
     val orientation = LocalConfiguration.current.orientation
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false)
+    }
+    val errorMessage by ApiService.errorMessage.collectAsState() // Sledovanie chýb
+    val coroutineScope = rememberCoroutineScope()
+
+
+
 
     Scaffold(
         topBar = {
@@ -176,14 +191,6 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.inputs_outputs)) },
-                            leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
-                            onClick = {
-                                expanded = false
-                                navigateToInputOutput()
-                            }
-                        )
-                        DropdownMenuItem(
                             text = { Text(stringResource(R.string.log_file)) },
                             leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
                             onClick = {
@@ -210,6 +217,32 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Zobrazenie chybovej hlášky
+            errorMessage?.let { message ->
+                val context = LocalContext.current
+                val translatedMessage = getTranslatedErrorMessage(context, message)
+
+
+
+                Text(
+                    text = translatedMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .background(MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                    textAlign = TextAlign.Center
+                )
+                coroutineScope.launch {
+                    delay(10_000) // 30 sekúnd
+                    if (ApiService.errorMessage.value == message) {
+                        ApiService.clearErrorMessage() // Bezpečná mutácia cez metódu
+                    }
+                }
+            }
+
             CardWithText(title = stringResource(R.string.values),
                 lines = listOf(
                     stringResource(R.string.temperature) to "${webSocketData.te} °C",
@@ -217,7 +250,9 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
                     stringResource(R.string.wifi) to "${webSocketData.wi} dB"
                 ),
                 states = webSocketData.cl,
-                flag = webSocketData.fl)
+                flag = webSocketData.fl,
+                tank = webSocketData.ip[2]
+            )
             CardWithText(
                 title = stringResource(R.string.control),
                 lines = listOf(
@@ -226,7 +261,8 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
                 ),
                 showButtons = true,
                 states = webSocketData.cl,
-                flag = webSocketData.fl
+                flag = webSocketData.fl,
+                tank = webSocketData.ip[2]
             )
             CardWithDynamicLeds(
                 title = stringResource(R.string.inputs_title),
@@ -236,7 +272,8 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
                     stringResource(R.string.tank),
                     stringResource(R.string.input4)
                 ),
-                states = webSocketData.ip
+                states = webSocketData.ip,
+                outputInfo = false
             )
             CardWithDynamicLeds(
                 title = stringResource(R.string.outputs_title),
@@ -246,7 +283,8 @@ fun MainPageWithMenuAndCards(navigateToInfo: () -> Unit, navigateToInputOutput: 
                     stringResource(R.string.heating),
                     stringResource(R.string.output4)
                 ),
-                states = webSocketData.ou
+                states = webSocketData.ou,
+                outputInfo = true
             )
         }
     }
@@ -258,7 +296,8 @@ fun CardWithText(
     lines: List<Pair<String, String>>,
     showButtons: Boolean = false,
     states: Boolean,
-    flag: Boolean
+    flag: Boolean,
+    tank: Boolean
 ) {
     val context = LocalContext.current
     var webSocketData by remember { mutableStateOf(WebSocketData()) }
@@ -330,7 +369,9 @@ fun CardWithText(
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (states) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                            containerColor = if (tank && states) MaterialTheme.colorScheme.inversePrimary else
+                                    if (states) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+
                         )
                     ) {
                         Text(
@@ -368,7 +409,8 @@ fun CardWithText(
 fun CardWithDynamicLeds(
     title: String,
     lines: List<String>,
-    states: List<Boolean>
+    states: List<Boolean>,
+    outputInfo: Boolean,
 ) {
     Card(
         modifier = Modifier
@@ -402,15 +444,34 @@ fun CardWithDynamicLeds(
                         text = line,
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    if (states.getOrNull(index) == true) {
-                        DarkLed {}
+                    if (outputInfo) {
+                        if (states.getOrNull(index) == true) {
+                            DarkLed {
+                                val newState = !states[index]
+                                sendWebSocketMessage("ou${index + 1}", newState)
+                            }
+                        } else {
+                            BrightLed {
+                                val newState = !states[index]
+                                sendWebSocketMessage("ou${index + 1}", newState)
+                            }
+                        }
                     } else {
-                        BrightLed {}
+                        if (states.getOrNull(index) == true) {
+                            DarkLed {}
+                        } else {
+                            BrightLed {}
+                        }
                     }
                 }
             }
         }
     }
+}
+// Funkcia na odoslanie správy na WebSocket server
+fun sendWebSocketMessage(command: String, state: Boolean) {
+    val message = "{\"com\":\"$command\",\"sta\":$state}"
+    ApiService.sendMessage(message)
 }
 
 fun formatLogData(rawData: String): List<Pair<String, String>> {
@@ -442,19 +503,6 @@ fun formatLogData(rawData: String): List<Pair<String, String>> {
     return logs
 }
 
-@Preview(showBackground = true)
-@Composable
-fun PreviewMainPageWithMenuAndCards() {
-    MainPageWithMenuAndCards(
-        navigateToInfo = {},
-        navigateToInputOutput = {},
-        navigateToSetup = {},
-        navigateToLogs = {},
-        webSocketData = WebSocketData(),
-        isWebSocketConnected = true
-    )
-}
-
 fun applyLocale(context: Context, languageCode: String): Context {
     val locale = Locale(languageCode)
     Locale.setDefault(locale)
@@ -463,6 +511,27 @@ fun applyLocale(context: Context, languageCode: String): Context {
     config.setLocale(locale)
     config.setLayoutDirection(locale)
 
-    context.resources.updateConfiguration(config, context.resources.displayMetrics)
     return context.createConfigurationContext(config)
+}
+// Mapa kódov na stringRes ID
+private val errorTranslations = mapOf(
+    "temperatureNotReached" to R.string.temperatureNotReached,
+    "temperatureToLow" to R.string.temperatureToLow,
+    "couldNotOpenLogFile" to R.string.couldNotOpenLogFile,
+    "SDCardError" to R.string.SDCardError,
+    "NTPError" to R.string.NTPError,
+    "TimeSetError" to R.string.TimeSetError,
+    "noResponse" to R.string.noResponse,
+)
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewMainPageWithMenuAndCards() {
+    MainPageWithMenuAndCards(
+        navigateToInfo = {},
+        navigateToSetup = {},
+        navigateToLogs = {},
+        webSocketData = WebSocketData(),
+        isWebSocketConnected = true
+    )
 }

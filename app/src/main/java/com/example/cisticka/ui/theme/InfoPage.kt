@@ -1,10 +1,13 @@
 package com.example.cisticka.ui.theme
 
+import android.content.Intent
 import android.content.res.Configuration
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -13,15 +16,23 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.cisticka.R
 import com.example.cisticka.ui.theme.ApiService.WebSocketData
+import androidx.core.net.toUri
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,11 +44,12 @@ fun InfoPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocket
             TopAppBar(
                 title = {
                     Row(
-                        modifier = Modifier.fillMaxWidth(), // Row vyplní celú šírku
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = stringResource(R.string.info_page),
-                            modifier = Modifier.weight(1f) // Posunie ostatné elementy doprava
+                        Text(
+                            text = stringResource(R.string.info_page),
+                            modifier = Modifier.weight(1f)
                         )
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
@@ -80,7 +92,8 @@ fun InfoPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocket
                     stringResource(R.string.depth) to "${webSocketData.de}mm",
                     stringResource(R.string.wifi) to "${webSocketData.wi}dB",
                     stringResource(R.string.hardware) to webSocketData.ha,
-                    stringResource(R.string.software) to webSocketData.so
+                    stringResource(R.string.software) to webSocketData.so,
+                    stringResource(R.string.application) to "V06.011"
                 )
             )
 
@@ -101,12 +114,12 @@ fun InfoPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocket
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Start // Zarovná prvky v rade doprava
+                        horizontalArrangement = Arrangement.Start
                     ) {
                         Text(
                             text = stringResource(R.string.information),
                             style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(end = 8.dp) // Pridá malé odsadenie od okraja
+                            modifier = Modifier.padding(end = 8.dp)
                         )
                     }
                     Image(
@@ -117,12 +130,7 @@ fun InfoPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocket
                             .height(200.dp),
                         contentScale = ContentScale.Crop
                     )
-                    Text(
-                        text = stringResource(R.string.info_text),
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Justify,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    InfoWithHyperlink()
                 }
             }
         }
@@ -174,6 +182,32 @@ fun CardWithDynamicText(
             }
         }
     }
+}
+
+
+@Composable
+fun InfoWithHyperlink() {
+    val context = LocalContext.current
+    val annotatedString = buildAnnotatedString {
+        append(stringResource(R.string.info_text))
+        pushStringAnnotation(tag = "URL", annotation = "https://oshwlab.com/bobobo007/cisticka-_v06-001/")
+        withStyle(style = SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline)) {
+            append("https://oshwlab.com/bobobo007/cisticka-_v06-001/")
+        }
+        pop()
+    }
+    BasicText(
+        text = annotatedString,
+        modifier = Modifier
+            .padding(8.dp)
+            .clickable {
+                annotatedString.getStringAnnotations(tag = "URL", start = 0, end = annotatedString.length).firstOrNull()?.let {
+                    val intent = Intent(Intent.ACTION_VIEW, it.item.toUri())
+                    context.startActivity(intent)
+                }
+            },
+        style = MaterialTheme.typography.bodyMedium
+    )
 }
 
 @Preview(showBackground = true)

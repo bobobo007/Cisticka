@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,30 +27,64 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
 import com.example.cisticka.R
-import com.example.cisticka.ui.theme.ApiService.WebSocketData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+class SetupPageViewModel : ViewModel() {
+    private val _isButtonNTPLoading = MutableStateFlow(false)
+    val isButtonNTPLoading: StateFlow<Boolean> = _isButtonNTPLoading
+
+    fun updateNTPServer() {
+        if (_isButtonNTPLoading.value) return
+        _isButtonNTPLoading.value = true
+        MainScope().launch {
+            try {
+                // Odošli príkaz na WebSocket server
+                withContext(Dispatchers.IO) {
+                    ApiService.sendMessage("{\"com\":\"nt\",\"sta\":true}")
+                }
+            } catch (e: Exception) {
+                // Spracuj chybu (môžete pridať Toast alebo logovanie, ak je potrebné)
+                withContext(Dispatchers.Main) {
+                    println("Error sending NTP command: ${e.message}")
+                }
+            } finally {
+                // Počkajte 61 sekúnd a potom tlačidlo znova povolte
+                delay(61000)
+                _isButtonNTPLoading.value = false
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocketConnected: Boolean) {
+fun SetupPage(navigateBack: () -> Unit, isWebSocketConnected: Boolean, getTranslatedErrorMessage: (String) -> String,
+              viewModel: SetupPageViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
     val context = LocalContext.current
     var isDeleteLoading by remember { mutableStateOf(false) }
-    var isButtonNTPLoading by remember { mutableStateOf(false) }
+    val isButtonNTPLoading by viewModel.isButtonNTPLoading.collectAsState()
     var isButtonTimeLoading by remember { mutableStateOf(false) }
     var serverAddress by rememberSaveable { mutableStateOf(ApiService.getWebSocketUrl()) }
     var selectedLanguage by rememberSaveable { mutableStateOf("sk") }
     val sharedPrefs = context.getSharedPreferences("AppPreferences", Context.MODE_PRIVATE)
     var currentLanguage by remember { mutableStateOf(sharedPrefs.getString("language", "sk") ?: "sk") }
     val orientation = LocalConfiguration.current.orientation
+    val errorMessage by ApiService.errorMessage.collectAsState() // Sledovanie chýb
+    val coroutineScope = rememberCoroutineScope()
 
-    // Funkcia na zmenu jazyka
+        // Funkcia na zmenu jazyka
     fun switchLanguage(languageCode: String) {
         if (languageCode != currentLanguage) {
             setLocale(context, languageCode)
@@ -58,22 +93,27 @@ fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocke
         }
     }
 
-    fun updateNTPServer() {
+/*    fun updateNTPServer() {
+        if (isButtonNTPLoading) return // Ak už čakáme, nič nerobíme
         isButtonNTPLoading = true
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                ApiService.sendMessage("{\"com\":\"nt\",\"sta\":$isButtonNTPLoading}")
+                ApiService.sendMessage("{\"com\":\"nt\",\"sta\":true}")
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, context.getString(R.string.error) + " ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             } finally {
                 withContext(Dispatchers.Main) {
-                    isButtonNTPLoading = false
+                    // Počkajte 45 sekúnd a potom tlačidlo znova povolte
+                    CoroutineScope(Dispatchers.Main).launch {
+                        kotlinx.coroutines.delay(45000)
+                        isButtonNTPLoading = false
+                    }
                 }
             }
         }
-    }
+    }*/
 
     @SuppressLint("SimpleDateFormat")
     fun sendCurrentTime() {
@@ -157,6 +197,27 @@ fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocke
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Zobrazenie chybovej hlášky
+            errorMessage?.let { message ->
+                val translatedMessage = getTranslatedErrorMessage(message)
+                Text(
+                    text = translatedMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .background(MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                    textAlign = TextAlign.Center
+                )
+                coroutineScope.launch {
+                    delay(10_000) // 30 sekúnd
+                    if (ApiService.errorMessage.value == message) {
+                        ApiService.clearErrorMessage() // Bezpečná mutácia cez metódu
+                    }
+                }
+            }
             // First Card
             Card(
                 modifier = Modifier
@@ -191,17 +252,17 @@ fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocke
                             modifier = Modifier.weight(1f)
                         ) {
                             Button(
-                                onClick = { updateNTPServer() },
+                                onClick = { viewModel.updateNTPServer() },
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = !isButtonNTPLoading,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (isButtonNTPLoading) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                                 )
                             ) {
-                                Text(stringResource(R.string.NTP_setting))
+                                Text(if (isButtonNTPLoading) stringResource(R.string.NTPTimeout) else stringResource(R.string.NTP_setting))
                             }
                             Text(
-                                text = stringResource(R.string.NTP_description),
+                                text = stringResource(R.string.NTP_description),//Text(if (isButtonNTPLoading) "Loading..." else "Set NTP Time")
                                 fontSize = 10.sp,
                                 textAlign = TextAlign.Center
                             )
@@ -296,10 +357,11 @@ fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocke
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
-                    ){
+                    ) {
                         TextField(
                             value = serverAddress,
                             onValueChange = { serverAddress = it },
+        //                    onValueChange = { input -> serverAddress = input },
                             label = { Text(stringResource(R.string.server_address)) }
                         )
                     }
@@ -312,7 +374,7 @@ fun SetupPage(navigateBack: () -> Unit, webSocketData: WebSocketData, isWebSocke
                     ){
                         Button(onClick = {
                             stopNetworkOperations()
-                            ApiService.updateWebSocketUrl(serverAddress)
+                            ApiService.updateWebSocketUrl(serverAddress, context)
                             startNetworkOperations()
                             Toast.makeText(
                                 context,
